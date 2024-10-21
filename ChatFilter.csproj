@@ -91,9 +91,10 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="CFConfig.cs" />
+    <Compile Include="CFConfigGui.cs" />
+    <Compile Include="CFSettings.cs" />
     <Compile Include="ChatFilter.cs" />
-    <Compile Include="Plugin.cs" />
+    <Compile Include="ChatFilterPlugin.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

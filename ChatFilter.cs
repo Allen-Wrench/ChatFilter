@@ -2,10 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net.Security;
 using System.Reflection;
 using System.Text;
-using System.Xml.Serialization;
 using HarmonyLib;
 using Sandbox.Engine.Multiplayer;
 using Sandbox.Game.GameSystems.Chat;
@@ -14,6 +12,7 @@ using Sandbox.Game.World;
 using Sandbox.Graphics.GUI;
 using Sandbox.ModAPI;
 using VRage.Game.ModAPI;
+using VRage.GameServices;
 using VRage.ModAPI;
 using VRage.Utils;
 using VRageMath;
@@ -46,102 +45,30 @@ namespace ChatFilter
             {
                 __instance.ChatCommands.Add(myChatCommand3.CommandText, myChatCommand3);
             }
-            MySession.Static.OnReady += SessionReady;
         }
 
         [HarmonyPrefix]
         [HarmonyPatch(typeof(MyHudChat), "OnMultiplayer_ChatMessageReceived")]
-        public static bool ChatRecievedPrefix(ulong steamUserId, string messageText, ChatChannel channel, long targetId, string customAuthorName = null)
+        public static bool ChatRecievedPrefix(ulong steamUserId, string messageText, ChatChannel channel, long targetId, ChatMessageCustomData? customData)
         {
             if (MySession.Static.IsUserAdmin(steamUserId))
             {
                 return true;
             }
-            if (!Settings.HideServer && steamUserId == MyMultiplayer.Static.ServerId)
+            if (!ChatFilterPlugin.Config.HideServer && steamUserId == MyMultiplayer.Static.ServerId)
             {
                 return true;
             }
-            if (Settings.HideServer && steamUserId == MyMultiplayer.Static.ServerId)
+            if (ChatFilterPlugin.Config.HideServer && steamUserId == MyMultiplayer.Static.ServerId)
             {
                 return false;
             }
-            if (Settings.HideGlobal && channel == ChatChannel.Global)
+            if (ChatFilterPlugin.Config.HideGlobal && channel == ChatChannel.Global)
             {
                 return false;
             }
             string item = MySession.Static.Players.TryGetIdentityNameFromSteamId(steamUserId);
-            return !Settings.BlockedNames.Contains(item) && (!Settings.HideFaction || channel != ChatChannel.Faction) && (!Settings.HidePrivate || channel != ChatChannel.Private);
-        }
-
-        public static void SessionReady()
-        {
-            MySession.Static.OnReady -= SessionReady;
-            MySession.OnUnloading += OnUnloading;
-            LoadSettings();
-        }
-
-        public static void OnUnloading()
-        {
-            MySession.OnUnloading -= OnUnloading;
-            SaveSettings();
-        }
-
-        public static void LoadSettings()
-        {
-            if (!File.Exists(path))
-            {
-                Settings = null;
-                MyLog.Default.Info("[ChatFilter] Settings file not found.");
-                SaveSettings();
-                return;
-            }
-            try
-            {
-                using (StreamReader streamReader = new StreamReader(path))
-                {
-                    Settings = MyAPIGateway.Utilities.SerializeFromXML<CFSettings>(streamReader.ReadToEnd());
-                }
-                if (Settings != null)
-                {
-                    StringBuilder sb = new StringBuilder("[ChatFilter] Loaded settings. Muted players: ");
-                    for (int i = 0; i < Settings.BlockedNames.Count; i++)
-                    {
-                        string name = Settings.BlockedNames[i];
-                        sb.Append(name);
-                        if (i != Settings.BlockedNames.Count - 1)
-                            sb.Append(", ");
-                    }
-                    MyLog.Default.Info(sb);
-                    return;
-                }
-                else
-                {
-                    MyLog.Default.Info("[ChatFilter] Failed to load settings.");
-                }
-            }
-            catch (Exception ex)
-            {
-                MyLog.Default.Error("[Chat Filter] Error during settings load: ", ex);
-            }
-            Settings = null;
-            SaveSettings();
-        }
-
-        public static void SaveSettings()
-        {
-            if (Settings == null)
-            {
-                Settings = new CFSettings();
-                MyLog.Default.Info("[Chat Filter] Saving default settings.");
-            }
-            try
-            {
-                File.WriteAllText(path, MyAPIGateway.Utilities.SerializeToXML(Settings));
-            }
-            catch (Exception ex)
-            {
-                MyLog.Default.Info("[Chat Filter] Error during settings save: ", ex);
-            }
+            return !ChatFilterPlugin.Config.BlockedNames.Contains(item) && (!ChatFilterPlugin.Config.HideFaction || channel != ChatChannel.Faction) && (!ChatFilterPlugin.Config.HidePrivate || channel != ChatChannel.Private);
         }
 
         [HarmonyPrefix]
@@ -152,15 +79,15 @@ namespace ChatFilter
             {
                 return true;
             }
-            if (Settings.HideGlobal && author != "Server" && author != "Good.bot")
+            if (ChatFilterPlugin.Config.HideGlobal && author != "Server" && author != "Good.bot")
             {
                 return false;
             }
-            if (Settings.HideServer && (author == "Server" || author == "Good.bot"))
+            if (ChatFilterPlugin.Config.HideServer && (author == "Server" || author == "Good.bot"))
             {
                 return false;
             }
-            foreach (string value in Settings.BlockedNames)
+            foreach (string value in ChatFilterPlugin.Config.BlockedNames)
             {
                 if (author.Contains(value))
                 {
@@ -169,28 +96,6 @@ namespace ChatFilter
             }
             return true;
         }
-
-        private static readonly string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpaceEngineers\\ChatFilter.cfg");
-
-        public static CFSettings Settings = new CFSettings();
-    }
-
-    [Serializable]
-    public class CFSettings
-    {
-        public CFSettings()
-        {
-        }
-
-        public List<string> BlockedNames = new List<string>();
-
-        public bool HideFaction;
-
-        public bool HideGlobal;
-
-        public bool HidePrivate;
-
-        public bool HideServer;
     }
 
     public class ChatCmd_Config : IMyChatCommand
@@ -201,7 +106,7 @@ namespace ChatFilter
 
         public void Handle(string[] args)
         {
-            MyGuiSandbox.AddScreen(new CFConfig());
+            MyGuiSandbox.AddScreen(new CFConfigGui());
         }
 
         public string CommandText
@@ -256,7 +161,7 @@ namespace ChatFilter
                 if (text.Contains('"'))
                     text = text.Replace('"', ':').Split(new char[1] { ':' }, StringSplitOptions.RemoveEmptyEntries)[0];
 
-                HashSet<string> names = MyHud.Chat.MessageHistory.Select(m => m.Sender).ToHashSet();
+                HashSet<string> names = MyHud.Chat.Messages.Select(m => m.Sender).ToHashSet();
                 if (!names.Contains(text) && text.Contains(' '))
                 {
                     string[] split = text.Split(' ');
@@ -277,11 +182,11 @@ namespace ChatFilter
                         }
                     }
                 }
-                if (!ChatFilter.Settings.BlockedNames.Contains(text))
+                if (!ChatFilterPlugin.Config.BlockedNames.Contains(text))
                 {
-                    ChatFilter.Settings.BlockedNames.Add(text);
+					ChatFilterPlugin.Config.BlockedNames.Add(text);
                     MyHud.Chat.ShowMessage("ChatFilter", "You will no longer see messages from " + text, Color.SlateGray);
-                    ChatFilter.SaveSettings();
+					ChatFilterPlugin.SaveConfig();
                     return;
                 }
                 else
@@ -293,7 +198,7 @@ namespace ChatFilter
             else
             {
                 string text2 = "Muted players: ";
-                foreach (string str in ChatFilter.Settings.BlockedNames)
+                foreach (string str in ChatFilterPlugin.Config.BlockedNames)
                 {
                     text2 = text2 + str + ", ";
                 }
@@ -345,7 +250,7 @@ namespace ChatFilter
             if (args == null || args.Length == 0)
             {
                 string text = "Muted players: ";
-                foreach (string str in ChatFilter.Settings.BlockedNames)
+                foreach (string str in ChatFilterPlugin.Config.BlockedNames)
                 {
                     text = text + str + ", ";
                 }
@@ -357,10 +262,10 @@ namespace ChatFilter
             {
                 text2 = text2 + " " + args[i];
             }
-            if (ChatFilter.Settings.BlockedNames.Remove(text2))
+            if (ChatFilterPlugin.Config.BlockedNames.Remove(text2))
             {
                 MyHud.Chat.ShowMessage("ChatFilter", text2 + " has been unmuted.", Color.SlateGray);
-                ChatFilter.SaveSettings();
+                ChatFilterPlugin.SaveConfig();
                 return;
             }
             MyHud.Chat.ShowMessage("ChatFilter", "That player is not currently muted.", Color.SlateGray);
